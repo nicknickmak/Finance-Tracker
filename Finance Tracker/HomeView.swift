@@ -17,8 +17,8 @@ struct BudgetCategory: Identifiable {
     }
 }
 
-struct Spending: Identifiable, Decodable {
-    let id: UUID
+struct Spending: Identifiable, Codable {
+    let id: String
     let amount: Double
     let date: Date
     let category: String
@@ -30,23 +30,39 @@ class HomeViewModel: ObservableObject {
     @Published var expandedCategoryIDs: Set<UUID> = []
 
     func fetchSpendings() {
-        // Replace with your API call
-        // For now, mock data
-        let mockSpendings = [
-            Spending(id: UUID(), amount: 20, date: Date(), category: "Food", description: "Lunch"),
-            Spending(id: UUID(), amount: 10, date: Date(), category: "Food", description: "Coffee"),
-            Spending(id: UUID(), amount: 50, date: Date(), category: "Transport", description: "Taxi"),
-            Spending(id: UUID(), amount: 100, date: Date(), category: "Shopping", description: "Clothes")
-        ]
-        let allocations = [
-            ("Food", 200.0),
-            ("Transport", 100.0),
-            ("Shopping", 300.0)
-        ]
-        categories = allocations.map { (name, allocated) in
-            let spendings = mockSpendings.filter { $0.category == name }.sorted { $0.date > $1.date }
-            return BudgetCategory(name: name, allocated: allocated, spendings: spendings)
+        guard let url = URL(string: "http://127.0.0.1:8000/transactions") else { return }
+        let task = URLSession.shared.dataTask(with: url) { data, response, error in
+            guard let data = data, error == nil else { return }
+            do {
+                let decoder = JSONDecoder()
+                let formatter = DateFormatter()
+                formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                decoder.dateDecodingStrategy = .formatted(formatter) // Matches backend date format
+                
+                print("Raw data: \(String(data: data, encoding: .utf8) ?? "nil")")
+                let spendings = try decoder.decode([Spending].self, from: data)
+                print("Decoded spendings count: \(spendings.count)")
+                let allocations = [
+                    ("Food", 200.0),
+                    ("Transport", 100.0),
+                    ("Shopping", 300.0)
+                ]
+                let newCategories = allocations.map { (name, allocated) in
+                    print("Processing category: \(name), allocated: \(allocated)")
+                    let filtered = spendings.filter { $0.category == name }.sorted { $0.date > $1.date }
+                    print("Spendings for \(name): \(filtered.count)")
+                    return BudgetCategory(name: name, allocated: allocated, spendings: filtered)
+                }
+                DispatchQueue.main.async {
+                    print("Updating categories on main thread")
+                    self.categories = newCategories
+                }
+            } catch {
+                print("Failed to decode spendings: \(error)")
+            }
         }
+        task.resume()
     }
 
     func toggleCategory(_ id: UUID) {
